@@ -1,4 +1,7 @@
-[![Build Status](https://travis-ci.org/RackSec/srslog.svg?branch=master)](https://travis-ci.org/RackSec/srslog)
+![Test Actions](https://github.com/yuchanns/srslog/workflows/test/badge.svg?branch=master)
+![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/yuchanns/srslog)
+![Go version](https://img.shields.io/github/go-mod/go-version/yuchanns/srslog)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yuchanns/srslog.svg)](https://pkg.go.dev/github.com/yuchanns/srslog)
 
 # srslog
 
