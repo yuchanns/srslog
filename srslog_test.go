@@ -69,6 +69,8 @@ func testableNetwork(network string) bool {
 			}
 		case "android":
 			return false
+		case "windows":
+			return false
 		}
 	}
 	return true
@@ -248,6 +250,11 @@ func TestNew(t *testing.T) {
 		t.Skip("skipping syslog test during -short")
 	}
 
+	net := "unix"
+	if !testableNetwork(net) {
+		t.Skipf("skipping on %s/%s; 'unix' is not supported", runtime.GOOS, runtime.GOARCH)
+	}
+
 	s, err := New(LOG_INFO|LOG_USER, "the_tag")
 	if err != nil {
 		t.Fatalf("New() failed: %s", err)
@@ -259,6 +266,10 @@ func TestNew(t *testing.T) {
 func TestNewLogger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping syslog test during -short")
+	}
+	net := "unix"
+	if !testableNetwork(net) {
+		t.Skipf("skipping on %s/%s; 'unix' is not supported", runtime.GOOS, runtime.GOARCH)
 	}
 	f, err := NewLogger(LOG_USER|LOG_INFO, 0)
 	if f == nil {
@@ -273,6 +284,10 @@ func TestDial(t *testing.T) {
 	f, err := Dial("", "", (LOG_LOCAL7|LOG_DEBUG)+1, "syslog_test")
 	if f != nil || err == nil {
 		t.Fatalf("Should have trapped bad priority")
+	}
+	net := "unix"
+	if !testableNetwork(net) {
+		t.Skipf("skipping on %s/%s; 'unix' is not supported", runtime.GOOS, runtime.GOARCH)
 	}
 	f, err = Dial("", "", -1, "syslog_test")
 	if f != nil || err == nil {

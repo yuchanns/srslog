@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -64,6 +65,10 @@ func TestGetDialer(t *testing.T) {
 }
 
 func TestUnixDialer(t *testing.T) {
+	net := "unix"
+	if !testableNetwork(net) {
+		t.Skipf("skipping on %s/%s; 'unix' is not supported", runtime.GOOS, runtime.GOARCH)
+	}
 	w := Writer{
 		priority: LOG_ERR,
 		tag:      "tag",
