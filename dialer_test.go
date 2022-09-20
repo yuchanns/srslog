@@ -1,12 +1,20 @@
 package srslog
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
-	"io/ioutil"
+	"fmt"
+	"math/big"
 	"net"
+	"os"
+	"path"
 	"testing"
+	"time"
 )
 
 func TestGetDialer(t *testing.T) {
@@ -87,13 +95,84 @@ func TestUnixDialer(t *testing.T) {
 	}
 }
 
+func KeyGen() (string, string, func() error, error) {
+	// generate certificate
+	baseDir := os.TempDir()
+	baseNameByte := make([]byte, 5)
+	if _, err := rand.Read(baseNameByte); err != nil {
+		return "", "", nil, err
+	}
+	priPath := path.Join(baseDir, fmt.Sprintf("%X_pri.pem", baseNameByte))
+	pubPath := path.Join(baseDir, fmt.Sprintf("%X_pub.pem", baseNameByte))
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	keyOut, err := os.Create(priPath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer keyOut.Close()
+	// Generate a pem block with the private key
+	if err := pem.Encode(keyOut, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}); err != nil {
+		return "", "", nil, err
+	}
+	tml := x509.Certificate{
+		// you can add any attr that you need
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().AddDate(5, 0, 0),
+		// you have to generate a different serial number each execution
+		SerialNumber: big.NewInt(123123),
+		Subject: pkix.Name{
+			CommonName:   "New Name",
+			Organization: []string{"New Org."},
+		},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	cert, err := x509.CreateCertificate(rand.Reader, &tml, &tml, &key.PublicKey, key)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	certOut, err := os.Create(pubPath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer certOut.Close()
+	// Generate a pem block with the certificate
+	if err := pem.Encode(certOut, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert,
+	}); err != nil {
+		return "", "", nil, err
+	}
+
+	return priPath, pubPath, func() error {
+		if err := os.Remove(priPath); err != nil {
+			return err
+		}
+		return os.Remove(pubPath)
+	}, nil
+}
+
 func TestTLSDialer(t *testing.T) {
+	priv, pub, cancel, err := KeyGen()
+	if err != nil {
+		t.Errorf("failed to generate certificate: %v", err)
+	}
+	defer func() { _ = cancel() }()
 	done := make(chan string)
-	addr, sock, _ := startServer("tcp+tls", "", done)
+	addr, sock, _ := startServer("tcp+tls", "", done, Cert{Pub: pub, Priv: priv})
 	defer sock.Close()
 
 	pool := x509.NewCertPool()
-	serverCert, err := ioutil.ReadFile("test/cert.pem")
+	serverCert, err := os.ReadFile(pub)
 	if err != nil {
 		t.Errorf("failed to read file: %v", err)
 	}

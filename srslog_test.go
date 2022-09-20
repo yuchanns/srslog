@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -23,7 +22,7 @@ func runPktSyslog(c net.PacketConn, done chan<- string) {
 		var n int
 		var err error
 
-		c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, _, err = c.ReadFrom(buf[:])
 		rcvd += string(buf[:n])
 		if err != nil {
@@ -85,7 +84,7 @@ func runStreamSyslog(l net.Listener, done chan<- string, wg *sync.WaitGroup) {
 		wg.Add(1)
 		go func(c net.Conn) {
 			defer wg.Done()
-			c.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
 			b := bufio.NewReader(c)
 			for ct := 1; !crashy.IsCrashy() || ct&7 != 0; ct++ {
 				s, err := b.ReadString('\n')
@@ -99,14 +98,19 @@ func runStreamSyslog(l net.Listener, done chan<- string, wg *sync.WaitGroup) {
 	}
 }
 
-func startServer(n, la string, done chan<- string) (addr string, sock io.Closer, wg *sync.WaitGroup) {
+type Cert struct {
+	Priv string
+	Pub  string
+}
+
+func startServer(n, la string, done chan<- string, certs ...Cert) (addr string, sock io.Closer, wg *sync.WaitGroup) {
 	if n == "udp" || n == "tcp" || n == "tcp+tls" {
 		la = "127.0.0.1:0"
 	} else {
 		// unix and unixgram: choose an address if none given
 		if la == "" {
-			// use ioutil.TempFile to get a name that is unique
-			f, err := ioutil.TempFile("", "syslogtest")
+			// use os.CreateTemp to get a name that is unique
+			f, err := os.CreateTemp("", "syslogtest")
 			if err != nil {
 				log.Fatal("TempFile: ", err)
 			}
@@ -130,7 +134,11 @@ func startServer(n, la string, done chan<- string) (addr string, sock io.Closer,
 			runPktSyslog(l, done)
 		}()
 	} else if n == "tcp+tls" {
-		cert, err := tls.LoadX509KeyPair("test/cert.pem", "test/privkey.pem")
+		if len(certs) == 0 {
+			log.Fatalf("certificates required.")
+		}
+		cer := certs[0]
+		cert, err := tls.LoadX509KeyPair(cer.Pub, cer.Priv)
 		if err != nil {
 			log.Fatalf("failed to load TLS keypair: %v", err)
 		}
@@ -263,11 +271,11 @@ func TestDial(t *testing.T) {
 		t.Skip("skipping syslog test during -short")
 	}
 	f, err := Dial("", "", (LOG_LOCAL7|LOG_DEBUG)+1, "syslog_test")
-	if f != nil {
+	if f != nil || err == nil {
 		t.Fatalf("Should have trapped bad priority")
 	}
 	f, err = Dial("", "", -1, "syslog_test")
-	if f != nil {
+	if f != nil || err == nil {
 		t.Fatalf("Should have trapped bad priority")
 	}
 	l, err := Dial("", "", LOG_USER|LOG_ERR, "syslog_test")
@@ -369,17 +377,22 @@ func TestTLSPathWrite(t *testing.T) {
 		// Write should not add \n if there already is one
 		{LOG_USER | LOG_ERR, "syslog_test", "write test 2\n", "%s %s syslog_test[%d]: write test 2\n"},
 	}
+	priv, pub, cancel, err := KeyGen()
+	if err != nil {
+		t.Errorf("failed to generate certificate: %v", err)
+	}
+	defer func() { _ = cancel() }()
 
 	if hostname, err := os.Hostname(); err != nil {
 		t.Fatalf("Error retrieving hostname")
 	} else {
 		for _, test := range tests {
 			done := make(chan string)
-			addr, sock, srvWG := startServer("tcp+tls", "", done)
+			addr, sock, srvWG := startServer("tcp+tls", "", done, Cert{Pub: pub, Priv: priv})
 			defer srvWG.Wait()
 			defer sock.Close()
 
-			l, err := DialWithTLSCertPath("tcp+tls", addr, test.pri, test.pre, "test/cert.pem")
+			l, err := DialWithTLSCertPath("tcp+tls", addr, test.pri, test.pre, pub)
 			if err != nil {
 				t.Fatalf("syslog.Dial() failed: %v", err)
 			}
@@ -411,17 +424,22 @@ func TestTLSCertWrite(t *testing.T) {
 		// Write should not add \n if there already is one
 		{LOG_USER | LOG_ERR, "syslog_test", "write test 2\n", "%s %s syslog_test[%d]: write test 2\n"},
 	}
+	priv, pub, cancel, err := KeyGen()
+	if err != nil {
+		t.Errorf("failed to generate certificate: %v", err)
+	}
+	defer func() { _ = cancel() }()
 
 	if hostname, err := os.Hostname(); err != nil {
 		t.Fatalf("Error retrieving hostname")
 	} else {
 		for _, test := range tests {
 			done := make(chan string)
-			addr, sock, srvWG := startServer("tcp+tls", "", done)
+			addr, sock, srvWG := startServer("tcp+tls", "", done, Cert{Pub: pub, Priv: priv})
 			defer srvWG.Wait()
 			defer sock.Close()
 
-			cert, err := ioutil.ReadFile("test/cert.pem")
+			cert, err := os.ReadFile(pub)
 			if err != nil {
 				t.Fatalf("cold not read cert: %v", err)
 			}
@@ -506,12 +524,15 @@ func TestConcurrentReconnect(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(N)
+	errChan := make(chan error, N)
+	defer close(errChan)
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
 			w, err := Dial(net, addr, LOG_USER|LOG_ERR, "tag")
 			if err != nil {
-				t.Fatalf("syslog.Dial() failed: %v", err)
+				errChan <- err
+				return
 			}
 			defer w.Close()
 			for i := 0; i < M; i++ {
@@ -532,6 +553,8 @@ func TestConcurrentReconnect(t *testing.T) {
 	case <-count:
 	case <-time.After(100 * time.Millisecond):
 		t.Error("timeout in concurrent reconnect")
+	case err := <-errChan:
+		t.Fatalf("syslog.Dial() failed: %v", err)
 	}
 }
 
@@ -541,7 +564,7 @@ func TestLocalConn(t *testing.T) {
 
 	lc := localConn{conn: conn}
 
-	lc.writeString(nil, nil, LOG_ERR, "hostname", "tag", "content")
+	_ = lc.writeString(nil, nil, LOG_ERR, "hostname", "tag", "content")
 
 	if len(messages) != 1 {
 		t.Errorf("should write one message")
