@@ -2,6 +2,7 @@
 ![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/yuchanns/srslog)
 ![Go version](https://img.shields.io/github/go-mod/go-version/yuchanns/srslog)
 [![Go Reference](https://pkg.go.dev/badge/github.com/yuchanns/srslog.svg)](https://pkg.go.dev/github.com/yuchanns/srslog)
+[![codecov](https://codecov.io/gh/yuchanns/srslog/branch/master/graph/badge.svg?token=7Y7QYFRXUG)](https://codecov.io/gh/yuchanns/srslog)
 
 # srslog
 
