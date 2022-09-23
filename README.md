@@ -29,7 +29,7 @@ Switch from the standard library:
 ```
 import(
     //"log/syslog"
-    syslog "github.com/RackSec/srslog"
+    syslog "github.com/yuchanns/srslog"
 )
 ```
 
@@ -112,17 +112,79 @@ Your custom dial func can set timeouts, proxy connections, and do whatever else 
 
 # Generating TLS Certificates
 
-We've provided a script that you can use to generate a self-signed keypair:
+We've provided an example of go code that you can use to generate a self-signed keypair:
 
 ```
-pip install cryptography
-python script/gen-certs.py
+func KeyGen() (string, string, func() error, error) {
+	// generate certificate
+	baseDir := os.TempDir()
+	baseNameByte := make([]byte, 5)
+	if _, err := rand.Read(baseNameByte); err != nil {
+		return "", "", nil, err
+	}
+	priPath := path.Join(baseDir, fmt.Sprintf("%X_pri.pem", baseNameByte))
+	pubPath := path.Join(baseDir, fmt.Sprintf("%X_pub.pem", baseNameByte))
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	keyOut, err := os.Create(priPath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer keyOut.Close()
+	// Generate a pem block with the private key
+	if err := pem.Encode(keyOut, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}); err != nil {
+		return "", "", nil, err
+	}
+	tml := x509.Certificate{
+		// you can add any attr that you need
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().AddDate(5, 0, 0),
+		// you have to generate a different serial number each execution
+		SerialNumber: big.NewInt(123123),
+		Subject: pkix.Name{
+			CommonName:   "New Name",
+			Organization: []string{"New Org."},
+		},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	cert, err := x509.CreateCertificate(rand.Reader, &tml, &tml, &key.PublicKey, key)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	certOut, err := os.Create(pubPath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer certOut.Close()
+	// Generate a pem block with the certificate
+	if err := pem.Encode(certOut, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert,
+	}); err != nil {
+		return "", "", nil, err
+	}
+
+	return priPath, pubPath, func() error {
+		if err := os.Remove(priPath); err != nil {
+			return err
+		}
+		return os.Remove(pubPath)
+	}, nil
+}
 ```
 
-That outputs the public key and private key to standard out. Put those into
-`.pem` files. (And don't put them into any source control. The certificate in
-the `test` directory is used by the unit tests, and please do not actually use
-it anywhere else.)
+That outputs the public key and private key will be put into `.pem` files which
+placed under `/tmp`. (The certificate in is used by the unit tests, and please
+do not actually use it anywhere else.)
 
 # Running Tests
 
@@ -132,15 +194,13 @@ Run the tests as usual:
 go test
 ```
 
-But we've also provided a test coverage script that will show you which
+Also a test coverage command will show you which
 lines of code are not covered:
 
 ```
-script/coverage --html
+go test -v ./... -coverprofile coverage.out -covermode count
+go tool cover -func coverage.out
 ```
-
-That will open a new browser tab showing coverage information.
-
 # License
 
 This project uses the New BSD License, the same as the Go project itself.

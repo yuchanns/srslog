@@ -41,8 +41,8 @@ func RFC3164Formatter(p Priority, hostname, tag, content string) string {
 
 // if string's length is greater than max, then use the last part
 func truncateStartStr(s string, max int) string {
-	if (len(s) > max) {
-		return s[len(s) - max:]
+	if len(s) > max {
+		return s[len(s)-max:]
 	}
 	return s
 }
@@ -54,5 +54,27 @@ func RFC5424Formatter(p Priority, hostname, tag, content string) string {
 	appName := truncateStartStr(os.Args[0], appNameMaxLength)
 	msg := fmt.Sprintf("<%d>%d %s %s %s %d %s - %s",
 		p, 1, timestamp, hostname, appName, pid, tag, content)
+	return msg
+}
+
+// RFC5424FormatterWithAppNameAsTag rsyslog uses appname part of syslog message to fill in an %syslogtag% template
+// attribute in rsyslog.conf. In order to be backward compatible to rfc3164
+// tag will be also used as an appname
+func RFC5424FormatterWithAppNameAsTag(p Priority, hostname, tag, content string) string {
+	timestamp := time.Now().Format(time.RFC3339)
+	pid := os.Getpid()
+	msg := fmt.Sprintf("<%d>%d %s %s %s %d %s - %s",
+		p, 1, timestamp, hostname, tag, pid, tag, content)
+	return msg
+}
+
+// RFC5424MicroFormatterWithAppNameAsTag The timestamp field in rfc5424 is derived from rfc3339. Whereas rfc3339 makes allowances
+// for multiple syntaxes, there are further restrictions in rfc5424, i.e., the maximum
+// resolution is limited to "TIME-SECFRAC" which is 6 (microsecond resolution)
+func RFC5424MicroFormatterWithAppNameAsTag(p Priority, hostname, tag, content string) string {
+	timestamp := time.Now().Format("2006-01-02T15:04:05.000000Z07:00")
+	pid := os.Getpid()
+	msg := fmt.Sprintf("<%d>%d %s %s %s %d %s - %s",
+		p, 1, timestamp, hostname, tag, pid, tag, content)
 	return msg
 }
